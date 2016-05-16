@@ -31,20 +31,34 @@ public class PokerHub extends Hub {
 	private GamePlay HubGamePlay;
 	private int iDealNbr = 0;
 	private eGameState eGameState;
-
+	private boolean serverRunning = true;
+	private int runningPort;
+	private int cardsDrawn=0;
+	private int drawCount=1;
 	public PokerHub(int port) throws IOException {
 		super(port);
+		runningPort=port;
 	}
 
 	protected void playerConnected(int playerID) {
 
-		if (playerID == 2) {
+		if (playerID == 4) {
 			shutdownServerSocket();
+			serverRunning=false;
 		}
 	}
 
 	protected void playerDisconnected(int playerID) {
-		shutDownHub();
+		if (!serverRunning){
+			try {
+				restartServer(runningPort);
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+		}
+		if (getPlayerList().length==0){
+			shutDownHub();
+		}
 	}
 
 	protected void messageReceived(int ClientID, Object message) {
@@ -148,21 +162,61 @@ public class PokerHub extends Hub {
 
 				// set the draw to the first draw
 				HubGamePlay.setDrawCnt(eDrawCount.FIRST);
-
 				//	try to deal the cards... this can potentially throw an exception.. if so, send the exception back to the client
+				
 				try {
 					DealCards(HubGamePlay.getRule().getCardDraw(HubGamePlay.getDrawCnt()));
+					drawCount++;
 				} catch (DeckException e) {
 					e.printStackTrace();
 					sendToAll(e);
 				}
-
+				 	
 				// Send the state of the game back to the players
 				System.out.println("Sending Start back to Client");
 				sendToAll(HubGamePlay);
 				break;
 			case Deal:
-
+				
+				sendToAll(HubGamePlay);
+				break;
+			case Draw:
+				resetOutput();
+				
+				int cardsToDraw = HubGamePlay.getRule().getTotalCardsToDraw();
+							
+				if(cardsDrawn<cardsToDraw){
+					for (eDrawCount count : eDrawCount.values()){
+						if (count.ordinal()==drawCount){
+							System.out.println(count);
+							HubGamePlay.setDrawCnt(count);
+							drawCount++;
+							break;
+						}
+					}
+					try {
+						DealCards(HubGamePlay.getRule().getCardDraw(HubGamePlay.getDrawCnt()));
+						drawCount++;
+					} catch (DeckException e) {
+						e.printStackTrace();
+						sendToAll(e);
+					}
+				}
+				if (cardsToDraw<=cardsDrawn){
+					int bestHandScore=Integer.MIN_VALUE;
+					Player winningPlayer = new Player();
+					for (Player player : HubGamePlay.getGamePlayers().values()){
+						int playerScore = HubGamePlay.getPlayerHand(player.getPlayerID()).getHandScore().getHandStrength();
+						if (playerScore>bestHandScore){
+							bestHandScore = playerScore;
+							winningPlayer = player;
+						}
+					}
+	
+					GamePlayPlayerHand WinningPlayer = new GamePlayPlayerHand(HubGamePlay,winningPlayer);
+					WinningPlayer.setWinningPlayer(winningPlayer);
+				}
+				sendToAll(HubGamePlay);
 				break;
 			}
 		}
@@ -182,6 +236,7 @@ public class PokerHub extends Hub {
 									.isFolded() == false) {
 						HubGamePlay.getPlayerHand(HubGamePlay.getPlayerByPosition(n).getPlayerID())
 								.Draw(HubGamePlay.getGameDeck());
+						cardsDrawn++;
 					}
 				}
 
@@ -189,6 +244,7 @@ public class PokerHub extends Hub {
 			else if (cd.getCardDestination() == eCardDestination.Community)
 			{
 				HubGamePlay.getCommonHand().Draw(HubGamePlay.getGameDeck());
+				cardsDrawn++;
 			}
 		}
 
